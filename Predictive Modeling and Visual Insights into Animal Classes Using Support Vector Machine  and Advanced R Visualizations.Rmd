@@ -1,0 +1,673 @@
+---
+title: "Predictive Modeling and Visual Insights into Animal Classes Using Support Vector Machine (SVM) and Advanced R Visualizations"
+author: "Amandeep Randhawa"
+date: "2025-06-28"
+output:
+  html_document:
+    df_print: paged
+  word_document: default
+  pdf_document: default
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+```
+
+**Introduction**
+
+The purpose of this project is to develop and evaluate a machine learning model capable of accurately classifying animals into their respective classes based on various biological and physical features. Using the Zoo dataset, which contains a range of animal attributes such as the presence of hair, feathers, number of legs, and other characteristics, we applied Support Vector Machines (SVM) to classify animals into distinct categories. This project involves exploratory data analysis, feature engineering, model training, hyperparameter tuning, and visualization to better understand the data and improve prediction accuracy. The ultimate goal is to demonstrate how machine learning techniques can be used effectively in biological classification problems and to gain insights into which features are most significant for differentiating animal classes.
+
+
+
+
+```{r}
+ #Load necessary libraries
+# install.packages("e1071") # Uncomment and run if you don't have e1071 installed
+# install.packages("dplyr") # Uncomment and run if you don't have dplyr installed
+# Load libraries
+library(e1071)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(scales)
+library(gridExtra)
+library(GGally)
+library(randomForest)
+library(vcd)
+library(reshape2)
+library(Rtsne)
+
+```
+
+
+
+```{r}
+## --- 1. Load the datasets ---
+# The zoo.csv file contains the animal features and numeric class type
+zoo_data <- read.csv("zoo.csv")
+
+# The class.csv file contains the mapping from numeric class type to character class type
+class_data <- read.csv("class.csv")
+
+# Display the first few rows of each dataset to understand their structure
+print("First few rows of zoo_data:")
+print(head(zoo_data))
+
+print("Structure of zoo_data:")
+print(str(zoo_data))
+
+print("First few rows of class_data:")
+print(head(class_data))
+
+print("Structure of class_data:")
+print(str(class_data))
+
+
+```
+
+
+```{r}
+# --- 2. Data Preprocessing ---
+
+
+colnames(zoo_data)<-tolower(colnames(zoo_data))
+print(colnames(zoo_data))
+colnames(class_data)<-c("class_type","class_name","animal_name","no_of_animals_in_class")
+class_data<- select(class_data,class_type,class_name)
+zoo_data$class_type<-as.factor(zoo_data$class_type)
+#print(zoo_data)
+#print(class_data)
+
+
+
+```
+
+```{r}
+# --- 3. Split the data into training and testing sets ---
+# Set seed for reproducibility
+set.seed(501)
+
+# Create a random sample of row indices for the training set
+# Using 70% of the data for training and 30% for testing
+intraining<-createDataPartition(y=zoo_data$class_type, p=.7,list = F)
+
+train_data <- zoo_data[intraining, ]
+test_data <- zoo_data[-intraining, ]
+
+# Drop 'animal_name' from training data
+train_data_clean <- subset(train_data, select = -animal_name)
+
+
+print(paste("Training data size:", nrow(train_data)))
+print(paste("Testing data size:", nrow(test_data)))
+str(train_data)
+
+
+```
+
+```{r}
+
+colnames(train_data)
+
+
+```
+
+
+
+
+```{r}
+
+# --- 4. Train the SVM model ---
+# For classification, 'Class_Type' is the dependent variable.
+# All other columns (features) are independent variables.
+# The formula is 'Class_Type ~ .' which means 'Class_Type' explained by all other columns.
+
+# Initial SVM model with a radial kernel (a common choice for non-linear relationships)
+# and default parameters.
+# The `scale = FALSE` argument is important here because our features are already binary (0/1)
+# or small integers (legs), and scaling them might not be necessary or could even distort.
+# However, for general SVM practice, scaling features is often recommended.
+# Given the nature of these specific features, we might not need extensive scaling.
+print("Training initial SVM model...")
+svm_model <- svm(class_type ~ ., data = train_data[, -1], kernel = "radial", scale = FALSE)
+
+print("SVM model trained.")
+print(summary(svm_model))
+
+
+```
+
+
+
+```{r}
+# --- 5. Make predictions on the test set ---
+print("Making predictions on the test set...")
+predictions <- predict(svm_model, test_data)
+print(predictions)
+
+```
+
+```{r}
+
+# --- 6. Evaluate the model ---
+# Create a confusion matrix to evaluate the model's performance
+predictions <- predict(svm_model, newdata = test_data[, -c(1, ncol(test_data))])  # remove animal_name and actual class_type
+conf_matrix <- confusionMatrix(predictions, test_data$class_type)
+print(conf_matrix)
+
+```
+
+
+**Analysis by Class**
+
+
+**Class 1 (e.g., Mammals)**
+Sensitivity = 1.0, Specificity = 0.9375, Precision = 92.3%
+
+This means all actual Class 1 instances were identified correctly, with a few false positives.
+
+Balanced Accuracy is 96.9%, which is strong.
+
+High detection prevalence indicates the model tends to predict this class more often — possibly due to it having the highest actual prevalence (42.9%).
+
+**Class 2**
+Perfect classification with 100% Sensitivity, Specificity, Precision, and Balanced Accuracy.
+
+Model performs perfectly for this class.
+
+**Class 3**
+Sensitivity = 0.0, meaning the model missed all instances of Class 3.
+
+This is concerning, as the model failed to detect any correct samples of this class.
+
+Balanced Accuracy is only 50%, the worst among all.
+
+Pos Pred Value is NaN, because no instances of Class 3 were predicted at all.
+
+**Class 4, 5, 6, 7**
+All these classes show perfect scores (100%) in all metrics.
+
+The model correctly detected and classified these rare classes despite their low prevalence (~3.5%–10.7%).
+
+This indicates good handling of rare classes, except Class 3.
+
+**Key Insight: Class Imbalance and Model Weaknes**
+While the model performs very well overall, it completely fails on Class 3.
+This is common in datasets where one class has very low representation (here, only 3.6% prevalence).
+
+Such failure is critical in real-world applications (e.g., medical diagnosis, fraud detection) and suggests the need for:
+
+Data augmentation for underrepresented classes
+
+Resampling techniques (e.g., SMOTE)
+
+Class weight tuning in the SVM
+
+```{r}
+
+# Calculate accuracy
+accuracy <- sum(diag(conf_matrix$table)) / sum(conf_matrix$table)
+print(paste("Accuracy of the SVM model on the test set:", round(accuracy, 4)))
+
+
+
+```
+
+
+```{r}
+
+# --- Optional: Hyperparameter Tuning using tune.svm ---
+# This step helps find the best 'cost' and 'gamma' parameters for a radial kernel SVM
+# by performing cross-validation. This can be computationally intensive.
+print("Starting hyperparameter tuning (this might take a while)...")
+
+
+# Now run hyperparameter tuning on the clean data
+tuned_svm <- tune.svm(
+  class_type ~ .,
+  data = train_data_clean,
+  kernel = "radial",
+  cost = c(0.1, 1, 10, 100),
+  gamma = c(0.01, 0.1, 0.5, 1, 2),
+  scale = FALSE
+)
+
+
+
+print("Best parameters found by tuning:")
+print(summary(tuned_svm))
+
+
+```
+
+```{r}
+
+# Train the SVM model with the best parameters found by tuning
+print("Training SVM model with best tuned parameters...")
+best_svm_model <- tuned_svm$best.model
+print("Best SVM model trained.")
+print(summary(best_svm_model))
+
+# Make predictions with the best model
+predictions_best_model <- predict(best_svm_model, test_data)
+
+# Evaluate the best model
+confusion_matrix_best <- table(Actual = test_data$class_type, Predicted = predictions_best_model)
+print("Confusion Matrix with Best Tuned Model:")
+print(confusion_matrix_best)
+
+accuracy_best <- sum(diag(confusion_matrix_best)) / sum(confusion_matrix_best)
+print(paste("Accuracy of the Best Tuned SVM model on the test set:", round(accuracy_best, 4)))
+
+# Display actual vs predicted for a few test samples
+print("Actual vs Predicted for first 10 test samples (Best Tuned Model):")
+comparison_df <- data.frame(Actual = test_data$class_type[1:10], Predicted = predictions_best_model[1:10])
+print(comparison_df)
+
+
+
+```
+
+**Visualization Analyses and Insights**
+
+**1. Bar Plot – Class Distribution**
+
+
+We created a bar chart showing the number of animals in each class type using the training data.
+
+
+This plot highlights whether the dataset is balanced across all animal classes or if some classes dominate the distribution. A balanced dataset is ideal for classification tasks, whereas imbalance might lead to biased predictions.
+
+
+
+
+```{r}
+# 1. Bar Plot of Class Distribution
+class_distribution_plot <- ggplot(train_data, aes(x = class_type, fill = class_type)) +
+  geom_bar() +
+  geom_text(stat='count', aes(label=..count..), vjust=-0.5, color="black") +
+  theme_minimal() +
+  labs(
+    title = "Distribution of Animal Classes in the Dataset",
+    x = "Animal Class Type",
+    y = "Number of Animals"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_brewer(palette = "Set3")
+print(class_distribution_plot)
+
+```
+
+
+
+**Pie Chart – Proportion of Animal Classes**
+
+
+We calculated the percentage of animals in each class and visualized it using a pie chart with percentage labels.
+
+Pie charts make it easy to visually compare the proportion of different classes. This helps us better understand which classes are more prevalent and can influence how we interpret model performance.
+
+
+
+```{r}
+# 2. Pie Chart of Class Proportions
+class_counts <- train_data %>%
+  count(class_type) %>%
+  mutate(percentage = n / sum(n) * 100,
+         label = paste0(class_type, " (", round(percentage, 1), "%)"))
+
+class_distribution_pie <- ggplot(class_counts, aes(x = "", y = n, fill = class_type)) +
+  geom_bar(width = 1, stat="identity") +
+  coord_polar(theta="y") +
+  theme_void() +
+  geom_text(aes(label=label), position=position_stack(vjust=0.5), size=3) +
+  labs(title = "Animal Class Distribution Pie Chart") +
+  scale_fill_brewer(palette = "Pastel1")
+print(class_distribution_pie)
+
+
+```
+
+
+
+**Lollipop Chart of Class Counts**
+
+We created a lollipop chart to display the distribution of animal classes in the dataset. Each lollipop represents one class type, with the stem representing the count and the dot indicating the end of that count.
+
+The goal was to show how many animals belong to each class type in a visually appealing and easy-to-read format. Compared to traditional bar charts, lollipop charts can reduce visual clutter while still effectively conveying count information. It helps identify if the dataset is imbalanced across classes, which is critical for model performance evaluation.
+
+```{r}
+
+# 3. Lollipop Chart of Class Counts
+class_distribution_lollipop <- ggplot(class_counts, aes(x = reorder(class_type, n), y = n)) +
+  geom_segment(aes(xend = class_type, y = 0, yend = n), color="gray") +
+  geom_point(size=5, color="darkorange") +
+  geom_text(aes(label=n), vjust=-0.5) +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Animal Class Distribution (Lollipop Chart)",
+    x = "Animal Class Type",
+    y = "Number of Animals"
+  )
+print(class_distribution_lollipop)
+
+
+```
+
+**Model Performance Visualizations**
+
+
+**Confusion Matrix Heatmap (for Best Tuned Model)**
+
+We generated a confusion matrix heatmap to visualize the classification performance of the best tuned Support Vector Machine (SVM) model. The matrix compares the predicted class labels against the actual labels for the test data.
+
+This heatmap helps us quickly identify:
+
+How often the model correctly predicted each class (diagonal cells)
+
+Where the model made mistakes (off-diagonal cells)
+
+The use of color gradients enhances interpretability—darker tiles indicate higher frequencies, helping us easily spot which classes are predicted well or poorly. This visualization supports error analysis and helps in diagnosing class-wise model performance.
+
+
+```{r}
+# 4. Confusion Matrix Heatmap (for best tuned model)
+caret_confusion_best <- caret::confusionMatrix(predictions_best_model, test_data$class_type)
+
+plot_confusion <- as.data.frame(as.table(caret_confusion_best$table))
+colnames(plot_confusion) <- c("Actual", "Predicted", "Freq")
+
+confusion_heatmap <- ggplot(plot_confusion, aes(x = Predicted, y = Actual, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), color = "white", size = 4) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  theme_minimal() +
+  labs(
+    title = "Confusion Matrix Heatmap (Best Tuned SVM Model)",
+    x = "Predicted Class",
+    y = "Actual Class"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5))
+print(confusion_heatmap)
+
+```
+
+
+**One-Bar Plot – Overall Model Accuracy**
+
+
+We created a single bar showing the best model’s accuracy.
+
+This gives a quick visual summary of model performance and can be used to compare against other models or baseline benchmarks.
+
+```{r}
+# 5. Overall Accuracy Bar
+accuracy_df <- data.frame(Model = "SVM Accuracy", Accuracy = accuracy_best)
+accuracy_plot <- ggplot(accuracy_df, aes(x = Model, y = Accuracy, fill = Model)) +
+  geom_bar(stat = "identity", width = 0.5) +
+  geom_text(aes(label = round(Accuracy, 4)), vjust = -0.5) +
+  theme_minimal() +
+  labs(title = "Overall SVM Model Accuracy", x = "", y = "Accuracy") +
+  theme(legend.position = "none")
+print(accuracy_plot)
+
+```
+
+
+
+**Dot Plot – Actual vs. Predicted Classes**
+
+
+We plotted a dot graph comparing actual and predicted class labels for the first 20 test samples.
+
+This allows us to visually check the model's correctness sample by sample, and quickly spot where it makes mistakes.
+
+
+```{r}
+# 6. Actual vs Predicted Dot Plot
+comparison_df <- data.frame(Actual = test_data$class_type, Predicted = predictions_best_model)
+
+dot_plot <- ggplot(comparison_df[1:20, ], aes(x = seq_along(Actual))) +
+  geom_point(aes(y = Actual, color = "Actual"), size = 3) +
+  geom_point(aes(y = Predicted, color = "Predicted"), shape = 4, size = 3) +
+  theme_minimal() +
+  labs(title = "Actual vs Predicted Classes (First 20 Test Samples)",
+       x = "Sample Index", y = "Class Type") +
+  scale_color_manual(values = c("Actual" = "blue", "Predicted" = "red"))
+print(dot_plot)
+
+
+
+```
+
+
+
+
+**Feature & Structure Visualizations**
+
+**Histogram – Distribution of Legs**
+
+
+We plotted a histogram of the number of legs across all animals.
+
+The histogram provides insight into how the ‘legs’ feature is distributed. This feature can be useful for classification (e.g., mammals tend to have 4 legs, insects 6, etc.).
+
+
+```{r}
+# 7. Histogram: Legs Distribution
+plot3 <- ggplot(train_data, aes(x = legs)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "black") +
+  theme_minimal() +
+  labs(title = "Distribution of Number of Legs", x = "Legs", y = "Frequency")
+print(plot3)
+
+```
+
+
+**Boxplot – Legs by Class Type**
+
+We plotted a boxplot showing the spread of leg counts for each animal class.
+
+This helps us understand how leg count varies by animal class and whether it can serve as a strong predictor in our model. For example, we might notice that certain classes have very specific ranges.
+
+
+
+```{r}
+
+# 8. Boxplot: Legs by Class
+plot4 <- ggplot(train_data, aes(x = class_type, y = legs, fill = class_type)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Boxplot of Number of Legs by Class", x = "Class Type", y = "Number of Legs") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_brewer(palette = "Set3")
+print(plot4)
+
+
+```
+
+
+
+**Correlation Heatmap – Numeric Features**
+
+We computed and visualized the correlation matrix of numeric features using a heatmap.
+
+This plot shows how features are related. Highly correlated features might be redundant, while uncorrelated features can offer unique predictive power.
+
+```{r}
+# 9. Correlation Heatmap of Numeric Features
+numeric_cols <- sapply(train_data, is.numeric)
+cor_mat <- cor(train_data[, numeric_cols])
+melted_cor <- reshape2::melt(cor_mat)
+
+plot5 <- ggplot(melted_cor, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Correlation Heatmap of Numeric Features", x = "", y = "")
+print(plot5)
+
+```
+
+
+**Feature Relationships & Projections**
+
+
+
+
+**Pairwise Scatterplots – Feature Relationships**
+
+
+We generated a pairwise scatterplot matrix for selected features (legs, hair, feathers, eggs, milk) colored by class.
+
+This visualization helps us examine how these features interact and cluster across different classes. It reveals patterns or overlaps that might affect the classifier’s accuracy.
+```{r}
+# 10. Pairwise Scatterplots
+selected_features <- c("legs", "hair", "feathers", "eggs", "milk")
+train_subset <- train_data[, c(selected_features, "class_type")]
+
+plot6 <- GGally::ggpairs(train_subset, aes(color = class_type, alpha = 0.5)) +
+  theme_bw()
+print(plot6)
+
+```
+
+
+
+**Feature Importance – Random Forest**
+
+We trained a Random Forest model and visualized the importance of each feature.
+
+This gives us an idea of which features contribute most to the model’s decisions. For instance, features like milk, feathers, or aquatic may have higher importance scores and be strong differentiators.
+
+```{r}
+
+# 11. Random Forest Feature Importance
+set.seed(501)
+rf_model <- randomForest(class_type ~ ., data = train_data[, !names(train_data) %in% c("animal_name")], importance = TRUE)
+
+imp <- importance(rf_model)
+imp_df <- data.frame(Feature = rownames(imp), Importance = imp[, "MeanDecreaseGini"]) %>%
+  arrange(desc(Importance))
+
+plot7 <- ggplot(imp_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "forestgreen") +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Feature Importance from Random Forest", x = "Feature", y = "Importance")
+
+print(plot7)
+
+```
+
+
+**Mosaic, PCA & t-SNE** 
+
+
+
+
+
+**Mosaic Plot – Hair vs. Class Type**
+
+We plotted a mosaic chart showing the relationship between hair presence and animal class.
+
+This helps identify whether the hair feature is unevenly distributed across classes, which might make it a strong indicator for classification.
+```{r}
+# 12. Mosaic Plot: Hair vs Class Type
+cat("Displaying Mosaic Plot (Hair presence vs Class Type)...\n")
+vcd::mosaic(~hair + class_type, data = train_data, shade = TRUE, legend = TRUE,
+            main = "Mosaic Plot: Hair vs Animal Class")
+
+
+```
+
+
+
+**PCA Plot – Principal Component Analysis**
+
+We applied PCA to reduce feature dimensions to 2 and visualized the data in a 2D scatter plot.
+
+PCA captures the most important variance in the data. This plot helps us visualize how well-separated the animal classes are in lower dimensions, which informs us about how separable the classes are in general.
+
+```{r}
+# 13. PCA Plot
+# Select only numeric columns from the training data
+pca_input <- train_data %>% select(where(is.numeric))
+
+# Run PCA
+pca_data <- prcomp(pca_input, center = TRUE, scale. = TRUE)
+
+# Create a dataframe with the PCA result and the class_type label
+pca_df <- data.frame(PC1 = pca_data$x[, 1],
+                     PC2 = pca_data$x[, 2],
+                     Class = train_data$class_type)
+
+# Plot PCA
+plot9 <- ggplot(pca_df, aes(x = PC1, y = PC2, color = Class)) +
+  geom_point(alpha = 0.7, size = 2) +
+  theme_minimal() +
+  labs(title = "PCA 2D Projection of Animals", x = "PC1", y = "PC2") +
+  scale_color_brewer(palette = "Set1")
+
+print(plot9)
+
+```
+
+
+
+**t-SNE Plot – Nonlinear Dimensionality Reduction**
+
+We applied t-SNE to project the high-dimensional data into 2D space for better class visualization.
+
+t-SNE is especially effective at preserving local structure and clusters. It gives an intuitive sense of how well the features group by class — which is useful for understanding class separability and model behavior.
+
+```{r}
+
+
+# Step 1: Select only numeric features
+tsne_input <- train_data %>% select(where(is.numeric))
+
+# Step 2: Remove duplicate rows
+tsne_input_unique <- tsne_input[!duplicated(tsne_input), ]
+
+# Step 3: Scale the input
+tsne_input_scaled <- scale(tsne_input_unique)
+
+# Step 4: Run t-SNE
+set.seed(501)
+tsne_out <- Rtsne(tsne_input_scaled, dims = 2, perplexity = 10, verbose = TRUE)
+
+# Step 5: Create tsne_df — note that we need to match back to original classes
+# So we need to get the corresponding rows from `train_data`
+# Match back only the unique rows we used for tsne
+matched_classes <- train_data[!duplicated(tsne_input), "class_type"]
+
+tsne_df <- data.frame(
+  Dim1 = tsne_out$Y[,1],
+  Dim2 = tsne_out$Y[,2],
+  Class = matched_classes
+)
+
+# Step 6: Plot
+ggplot(tsne_df, aes(x = Dim1, y = Dim2, color = Class)) +
+  geom_point(alpha = 0.7, size = 2) +
+  theme_minimal() +
+  labs(title = "t-SNE Plot of Animals", x = "Dimension 1", y = "Dimension 2") +
+  scale_color_brewer(palette = "Set1")
+
+
+```
+
+
+**Conclusion**
+
+
+In this project, we successfully built an SVM-based classification model to predict animal classes from the Zoo dataset. Through exploratory data analysis and visualizations, we gained a comprehensive understanding of feature distributions and their relationships with animal classes. Hyperparameter tuning further enhanced the model’s performance, achieving a high accuracy on the test set. Visualizations such as PCA and t-SNE provided valuable insights into the data’s structure and class separability. The project highlights the importance of thorough data preprocessing, feature selection, and model tuning in developing effective classifiers. This approach can be extended to other biological or ecological datasets, reinforcing the power of machine learning in scientific research and data-driven decision-making.
+
+
